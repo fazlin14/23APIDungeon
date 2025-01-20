@@ -1,0 +1,20 @@
+const express = require('express')
+const router = express.Router()
+
+var getMongoDbConnection = require('./database.js')
+
+router.get('/test', async (req, res) => {
+
+    let client = await getMongoDbConnection
+
+    client.db(`ds_db`).collection(`almanac`).insertOne(
+        {
+            subject: `test`,
+            success: `true`
+        }
+    )
+
+    res.send(`Successful`)
+})
+
+module.exports = router
