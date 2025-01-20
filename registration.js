@@ -1,301 +1,177 @@
 const express = require('express');
-const registrationRouter=express.Router();
-module.exports=registrationRouter;
+const registrationRouter = express.Router();
+module.exports = registrationRouter;
 
-const bcrypt = require('bcrypt')
-
-const client = require(`./database.js`)
-var jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const client = require('./database.js');
+const jwt = require('jsonwebtoken');
 const { ObjectId } = require('mongodb');
+const { randomise_enemy_skill } = require('./update_enemy.js');
+require('dotenv').config(); // Load environment variables
 
-let { randomise_enemy_skill } = require(`./update_enemy.js`)
+// Middleware for token verification
+function verifyToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
 
-//app.use(express.json());
-
-//part for token verification
-
-// client.connect()
-//     .then(() => {
-//         app.listen(3000, () => {
-//             console.log(`Server is running on port 3000`);
-//         });
-//     })
-//     .catch(err => console.error(err));
-
-    function verifyToken(req, res, next) {
-      const bearerHeader = req.headers['authorization'];
-      if (typeof bearerHeader !== 'undefined') {
-          const bearer = bearerHeader.split(' ');
-          const bearerToken = bearer[1];
-          req.token = bearerToken;
-          jwt.verify(req.token, 'chiikawaaaaaaa', (err, authData) => {
-              if(err) {
-                  res.sendStatus(403);
-              } else {
-                  req.authData = authData;
-                  next();
-              }
-          });
-      } else {
-          res.sendStatus(403);
-      }
-  }
-
-
-
-registrationRouter.post('/account/login',async(req,res) => { 
-    // step #1:req.body.username
-      let result = await client.db("ds_db").collection("account").findOne({
-        player: req.body.player
-    })
-    console.log(result);
-    console.log(req.body);
-    if(!req.body.player || !req.body.password){
-      res.status(404).send('Please provide username and password')
-      return
+    if (!token) {
+        return res.status(401).send('Token is required');
     }
-    else if(req.body.player != null && req.body.password != null){
-    
-      if(result){
-        //step2:if user exists, check if password is correct
-        if(bcrypt.compareSync(req.body.password,result.password)==true){
-          var token = jwt.sign(
-            { _id: result._id, player: result.player}, 
-            'chiikawaaaaaaa',
-          
-          { expiresIn: 60*60*2  });
-          //paaword is correct
-          res.send(token);
-        } else{
-          //password is incorrect
-          res.status(404).send('Wrong Password');
-        
+
+    jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] }, (err, decoded) => {
+        if (err) {
+            return res.status(403).send('Invalid or expired token');
         }
-      }else{
-        //step3:if user not found
-        res.send('User not found');
-      
-      }
-  }
-  })
-  
-  
-  
-  
-  registrationRouter.get('/account/:id',verifyToken, async(req, res) => {
-    if (req.authData._id != req.params.id) {
-      res.send('User is not authorized')
-      return
-    }
-    let auth = req.headers.authorization
-    console.log(auth)
-  
-    let authSplitted = auth.split(' ')
-    console.log(authSplitted)
-  
-    let token = authSplitted[1]
-    console.log(token)
-  
-    let decoded = jwt.verify(token, 'chiikawaaaaaaa')
-    console.log(decoded)
-  
-    if (req.authData._id != req.params.id) {
-      res.send('User is not authorized')
-      return
-    }
-    else{
-    let result= await client.db("ds_db").collection("account").findOne({
-      _id: new ObjectId(req.params.id)
-    })
-    res.send(`Player name : ${result.player}\n _id: ${result._id}`)
-    
-  }
-  })
-
-
-// Get the leaderboard
-
-registrationRouter.get('/leaderboard', async(req, res) => {
-    let LatestLB = await client.db("ds_db").collection("leaderboard")
-        .find()
-        .sort({ score: -1 }) // Sort by score in descending order
-        .toArray();
-
-    res.json(LatestLB);
-});
-
-
-
-
-//account registration
-
-
-
-registrationRouter.post('/account/register',async(req,res)=>{
-
-  if(!req.body.player || !req.body.password){
-    res.status(404).send('Please provide username and password')
-    return
-  }
-
-    let Exists= await client.db("ds_db").collection("account").findOne({
-        player:req.body.player
+        req.authData = decoded;
+        next();
     });
-    if(Exists){
-        res.status(404).send("Player already exists");
-        return
+}
+
+// *LOGIN*
+registrationRouter.post('/account/login', async (req, res) => {
+    const { player, password } = req.body;
+
+    if (!player || !password) {
+        return res.status(400).send('Username and password are required');
     }
-    else{
-        const hash = bcrypt.hashSync(req.body.password, 10);
-        let result= await client.db("ds_db").collection("account").insertOne({
-            player:req.body.player,
-            password:hash
-       
-        });
-        let result1 = await client.db('ds_db').collection('almanac').aggregate([{$sample:{size:1}}]).toArray();
-      let document = result1[0]; // get the first document from the result array
-      // let skills = document.skill;
 
-      // Generate a random index
-      // let randomIndex = Math.floor(Math.random() * skills.length);
+    const result = await client.db('ds_db').collection('account').findOne({ player });
 
-      // Get a random skill
-      // let randomSkill = skills[randomIndex];
-      
-      let the_enemy_skill = await randomise_enemy_skill(document.enemy)
-
-      let statPlayer= await client.db("ds_db").collection("stats").insertOne({
-          playerId:req.body.player,
-          health_pts:10,
-          attack_action:10,
-          evade_action:5,
-          inventory:[],
-          coin: 10,
-          current_score:0,
-          current_enemy:document.enemy,
-          enemy_current_health:document.base_health,
-          enemy_next_move:the_enemy_skill,
-    
-     })
+    if (!result) {
+        return res.status(404).send('User not found');
     }
-    
-    let give_id = await client.db('ds_db').collection('account').findOne(
-      { player: req.body.player }
-     )
 
-    res.send(`Account created successfully\nuser id: ${give_id._id}\nplease remember your user id!`);
-    
-})
+    const isPasswordValid = bcrypt.compareSync(password, result.password);
 
-
-//forget userid
-
-registrationRouter.post('/account/forgetuserID', async(req, res) => {
-    let result = await client.db("ds_db").collection("account").findOne({
-      player: req.body.player
-        
-    })
-    if(!req.body.player || !req.body.password){
-        res.status(404).send('Please provide username and password')
-      }
-      else if(req.body.player != null && req.body.password != null){
-      
-        if(result){
-          //step2:if user exists, check if password is correct
-          if(bcrypt.compareSync(req.body.password,result.password)==true){
-            //paaword is correct
-            res.send(result._id);
-          } else{
-            //password is incorrect
-            res.status(404).send('Wrong Password');
-          
-          }
-        }else{
-          //step3:if user not found
-          res.send('User not found');
-        
-        }
+    if (isPasswordValid) {
+        const token = jwt.sign(
+            { _id: result._id, player: result.player },
+            process.env.JWT_SECRET,
+            { expiresIn: '2h', algorithm: 'HS256' }
+        );
+        res.json({ token });
+    } else {
+        res.status(401).send('Incorrect password');
     }
 });
 
-
-//update or change password for current account
-registrationRouter.patch ("/account/changepassword" ,async (req, res) => {
-
-  if(!req.body.player || !req.body.password){
-    res.status(404).send('Please provide username and password')
-    return
-  }
-
-    if (!req.body.newpassword) {
-      return res.status(400).send('New password is required');
-  }
-
-    let findUser = await client.db('ds_db').collection('account').findOne({player:req.body.player});
-
-    if(!findUser) {
-      res.send('user not found')
-      return
+// *GET ACCOUNT*
+registrationRouter.get('/account/:id', verifyToken, async (req, res) => {
+    if (req.authData._id !== req.params.id) {
+        return res.status(403).send('User is not authorized');
     }
 
-        if (bcrypt.compareSync(req.body.password, findUser.password) == true){ //compare the password with the hashed password in the database
-        
-        req.body.password = bcrypt.hashSync(req.body.newpassword, 10); //hash the new password
-        await client.db('ds_db').collection('account').updateOne({player:req.body.player}, {$set: {password:req.body.password}}); //update the password in the database
-        res.send('password changed successfully');
-        } 
-        else { //password is incorrect
-            res.status(401).send('password incorrect')
-          }
+    const account = await client.db('ds_db').collection('account').findOne({ _id: new ObjectId(req.params.id) });
 
+    if (!account) {
+        return res.status(404).send('Account not found');
+    }
+
+    res.json({ player: account.player, id: account._id });
+});
+
+// *REGISTER*
+registrationRouter.post('/account/register', async (req, res) => {
+    const { player, password } = req.body;
+
+    if (!player || !password) {
+        return res.status(400).send('Username and password are required');
+    }
+
+    const exists = await client.db('ds_db').collection('account').findOne({ player });
+
+    if (exists) {
+        return res.status(409).send('Player already exists');
+    }
+
+    const hash = bcrypt.hashSync(password, 10);
+
+    await client.db('ds_db').collection('account').insertOne({ player, password: hash });
+    const enemy = await client.db('ds_db').collection('almanac').aggregate([{ $sample: { size: 1 } }]).toArray();
+    const document = enemy[0];
+    const skill = await randomise_enemy_skill(document.enemy);
+
+    await client.db('ds_db').collection('stats').insertOne({
+        playerId: player,
+        health_pts: 10,
+        attack_action: 10,
+        evade_action: 5,
+        inventory: [],
+        coin: 10,
+        current_score: 0,
+        current_enemy: document.enemy,
+        enemy_current_health: document.base_health,
+        enemy_next_move: skill,
     });
 
+    const user = await client.db('ds_db').collection('account').findOne({ player });
+    res.json({ message: 'Account created successfully', userId: user._id });
+});
 
-//delete current account
-registrationRouter.delete('/account/delete/:id',verifyToken, async(req, res) => {
+// *LEADERBOARD*
+registrationRouter.get('/leaderboard', async (req, res) => {
+    const leaderboard = await client.db('ds_db').collection('leaderboard').find().sort({ score: -1 }).toArray();
+    res.json(leaderboard);
+});
 
-  let player = await client.db("ds_db").collection("account").findOne(
-    { _id: new ObjectId(req.params.id) }
-  )
+// *FORGOT USER ID*
+registrationRouter.post('/account/forgetuserID', async (req, res) => {
+    const { player, password } = req.body;
 
-  if(!req.body.password || !req.body.player) {
-    res.send('Not enough data\nPlease provide the player and password')
-    return
-  }
+    if (!player || !password) {
+        return res.status(400).send('Username and password are required');
+    }
 
-  if(req.authData._id != req.params.id){
-          res.send('User is not authorized')
-          return
-        }
-        else if(!player){
-          res.send(`Could not find player`)
-          return
-        }
-        else if(bcrypt.compareSync(req.body.password,player.password)==false){
-          res.send('Incorrect password')
-          return
-        }
-        else{
+    const user = await client.db('ds_db').collection('account').findOne({ player });
 
-        let result= await client.db("ds_db").collection("account").deleteOne({
-            _id: new ObjectId(req.params.id)
-        })
+    if (!user) {
+        return res.status(404).send('User not found');
+    }
 
-        let delete_stats = await client.db("ds_db").collection("stats").deleteOne(
-          { playerId: player.player }
-        )
+    if (!bcrypt.compareSync(password, user.password)) {
+        return res.status(401).send('Incorrect password');
+    }
 
-        let delete_leaderboard = await client.db('ds_db').collection('leaderboard').deleteOne(
-          { player: player.player }
-        )
+    res.json({ userId: user._id });
+});
 
-        let delete_action = await client.db('ds_db').collection('leaderboard').deleteOne(
-          { playerId: player.player }
-        )
-        
-        res.send("Account Deleted Successfully");
+// *CHANGE PASSWORD*
+registrationRouter.patch('/account/changepassword', async (req, res) => {
+    const { player, password, newpassword } = req.body;
 
-        }
-        
-    
-    });
+    if (!player || !password || !newpassword) {
+        return res.status(400).send('All fields are required');
+    }
+
+    const user = await client.db('ds_db').collection('account').findOne({ player });
+
+    if (!user || !bcrypt.compareSync(password, user.password)) {
+        return res.status(401).send('Invalid credentials');
+    }
+
+    const hashedPassword = bcrypt.hashSync(newpassword, 10);
+    await client.db('ds_db').collection('account').updateOne({ player }, { $set: { password: hashedPassword } });
+
+    res.send('Password changed successfully');
+});
+
+// *DELETE ACCOUNT*
+registrationRouter.delete('/account/delete/:id', verifyToken, async (req, res) => {
+    if (req.authData._id !== req.params.id) {
+        return res.status(403).send('User is not authorized');
+    }
+
+    const player = await client.db('ds_db').collection('account').findOne({ _id: new ObjectId(req.params.id) });
+
+    if (!player) {
+        return res.status(404).send('Player not found');
+    }
+
+    const { player: playerName } = player;
+
+    await client.db('ds_db').collection('account').deleteOne({ _id: new ObjectId(req.params.id) });
+    await client.db('ds_db').collection('stats').deleteOne({ playerId: playerName });
+    await client.db('ds_db').collection('leaderboard').deleteMany({ player: playerName });
+
+    res.send('Account deleted successfully');
+});

@@ -4,12 +4,12 @@ const port = process.env.PORT || 3000;
 
 app.use(express.json())
 
-let client = require(`./database`)
+let client = require(./database)
 
-const almanacRoute = require(`./almanac`)
-const inventoryRoute = require(`./inventory`)
-const nextActionRoute = require(`./next_action`)
-const registrationRoute = require(`./registration`)
+const almanacRoute = require(./almanac)
+const inventoryRoute = require(./inventory)
+const nextActionRoute = require(./next_action)
+const registrationRoute = require(./registration)
 
 app.use(almanacRoute)
 app.use(inventoryRoute)
@@ -48,7 +48,10 @@ PATCH - /action
 DELETE - /action
 GET - /stats
 GET - /wiki
-GET - /leaderboard`
+GET - /leaderboard
+
+[Note: Some endpoints require a Bearer token in the Authorization header. Login to generate your token.]
+`;
 
 app.use((req, res) => {
   res.send(no_endpoint_message)
@@ -56,7 +59,7 @@ app.use((req, res) => {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
 app.listen(port, () => {
-   console.log(`Example app listening on port ${port}`)
+   console.log(Example app listening on port ${port})
 })
 
 async function run() {
